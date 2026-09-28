@@ -103,6 +103,7 @@ import { readHands, computeSignals } from '../src/input/signals.js';
 import { RUNES, RUNE_KEYS, RuneBank } from '../src/input/runes.js';
 import { TouchRuneBank, InputRouter } from '../src/input/touch.js';
 import { ShapeRecognizer, builtinTemplates } from '../src/input/shape.js';
+import { loadHandLandmarker } from '../src/input/mp-loader.js';
 
 const $ = (id) => document.getElementById(id);
 const statusEl = $('status');
@@ -281,21 +282,9 @@ $('start').onclick = async () => {
     await video.play();
     ov.width = video.videoWidth || 640; ov.height = video.videoHeight || 480;
     setStatus('載入辨識模型中…（第一次比較久）');
-    const vision = await import('./vendor/vision_bundle.mjs');
-    const fileset = await vision.FilesetResolver.forVisionTasks('./vendor/wasm');
-    const makeLandmarker = (delegate) => vision.HandLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: './vendor/hand_landmarker.task', delegate },
-      runningMode: 'VIDEO', numHands: 2,
-      minHandDetectionConfidence: 0.3, minHandPresenceConfidence: 0.3, minTrackingConfidence: 0.3,
-    });
-    // GPU 比較快，但在某些 iOS Safari 上會初始化失敗。失敗就退回 CPU，
-    // 免得看起來像「手勢壞掉」——那會讓人以為整套不能用。
-    try { landmarker = await makeLandmarker('GPU'); }
-    catch (gpuErr) {
-      console.warn('GPU delegate 失敗，改用 CPU：', gpuErr);
-      landmarker = await makeLandmarker('CPU');
-      setStatus('（註：這台裝置的 GPU 加速不可用，已改用 CPU，可能比較慢。）');
-    }
+    const loaded = await loadHandLandmarker();
+    landmarker = loaded.landmarker;
+    if (loaded.delegate === 'CPU') setStatus('（註：這台裝置的 GPU 加速不可用，已改用 CPU，可能比較慢。）');
     $('calRest').disabled = false; $('calTop').disabled = false;
     setStatus('準備好了。先按「校正：自然垂放」，雙手自然放在身前一秒；再按「校正：盡力舉高」，雙手盡量舉高但要留在畫面裡。');
   } catch (e) {

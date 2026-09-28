@@ -12,8 +12,11 @@ def y_at(phase, u):
     if phase == "rest":   return REST_Y
     if phase == "top":    return TOP_Y
     if phase == "settle": return REST_Y
-    # hold：1 秒內舉到約 0.85 抬升度，之後維持（帶一點自然的晃動）
-    lift = min(1.0, u / 1.0) * 0.85
+    # hold：立刻到位再維持。
+    # 這裡刻意不做緩慢上升：整支影片會被以極低 fps 重新編碼放慢（Pi 推論很慢），
+    # 若生成時還做 1 秒的漸進，重編碼後會變成「花好幾秒緩慢舉手」——
+    # 那不是人的真實動作，只會讓測試去測一個不存在的情境。
+    lift = 0.85
     return REST_Y - lift * (REST_Y - TOP_Y) + 3 * math.sin(u * 6)
 
 out = "seq2"

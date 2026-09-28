@@ -29,7 +29,7 @@ fi
 if [ ! -f p0/fake_two_hands_slow.y4m ]; then
   echo "[!] 缺少測試影片，重新產生中…"
   (cd p0 && python3 gen_two_hands.py >/dev/null && \
-   ffmpeg -y -loglevel error -framerate 3 -i seq2/%04d.png -pix_fmt yuv420p fake_two_hands_slow.y4m)
+   ffmpeg -y -loglevel error -framerate 2 -i seq2/%04d.png -pix_fmt yuv420p fake_two_hands_slow.y4m)
 fi
 OUT=$(timeout 500 node p0/run_page.js "http://127.0.0.1:$PORT/web/integration-test.html" 440 \
   --use-fake-ui-for-media-stream --use-fake-device-for-media-stream \
