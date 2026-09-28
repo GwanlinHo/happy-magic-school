@@ -161,7 +161,10 @@
 1. **MediaPipe 資產 42MB**（wasm 12MB × 3 版本 + 模型 7.8MB）。
    對 PWA 離線預快取太大。決定：**核心（觸控可玩的部分）進預快取，MediaPipe 改成用到手勢時才載入**，並只保留需要的 wasm 版本。列入 P6。
 2. 螺旋的畫形辨識 10/12，與「圓」較易混淆。若 P2 實際用到螺旋再調整樣板。
-3. `p0/*.y4m`、`p0/seq*/`、`p0/frames/`、`node_modules/`、`web/vendor/` 都要進 `.gitignore`（web/vendor 之後改 CDN 或建置時產生）。
+3. `p0/*.y4m`、`p0/seq*/`、`p0/frames/`、`node_modules/`、`web/vendor/` 已進 `.gitignore`；
+   改由 `p0/fetch_assets.sh` 重建（`run_tests.sh` 發現缺檔會自動呼叫），所以從乾淨 clone 也跑得起來。
+4. `gesture-lab.html` 的 GPU delegate 在本機測不到（Pi 走 swiftshader）。已加上失敗自動退回 CPU 的處理，
+   避免在她的平板上 GPU 初始化失敗時看起來像「手勢整個壞掉」。真正的 GPU 路徑要等平板上才驗得到。
 
 ### 給使用者的下一步（決策點）
 
