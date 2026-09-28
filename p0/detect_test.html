@@ -1,0 +1,37 @@
+<!doctype html><meta charset="utf-8"><title>P0 hand detect</title>
+<pre id="log">booting...</pre>
+<script type="module">
+const log = (s) => { document.getElementById('log').textContent += "\n" + s; };
+document.getElementById('log').textContent = "start";
+try {
+  const vision = await import('./node_modules/@mediapipe/tasks-vision/vision_bundle.mjs');
+  log("module loaded");
+  const fileset = await vision.FilesetResolver.forVisionTasks('./node_modules/@mediapipe/tasks-vision/wasm');
+  log("fileset ok");
+  const hl = await vision.HandLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: './hand_landmarker.task', delegate: 'CPU' },
+    runningMode: 'IMAGE', numHands: 2, minHandDetectionConfidence: 0.2,
+    minHandPresenceConfidence: 0.2, minTrackingConfidence: 0.2,
+  });
+  log("landmarker ready");
+  const cases = ['open_center','open_high','fist','two_hands','tilt'];
+  for (const c of cases) {
+    const img = new Image();
+    img.src = `./frames/${c}.png`;
+    await img.decode();
+    const t0 = performance.now();
+    const r = hl.detect(img);
+    const ms = (performance.now() - t0).toFixed(0);
+    const n = r.landmarks ? r.landmarks.length : 0;
+    let extra = '';
+    if (n) {
+      const w = r.landmarks[0][0];
+      extra = ` wrist=(${w.x.toFixed(3)},${w.y.toFixed(3)}) pts=${r.landmarks[0].length}`
+            + ` handed=${r.handednesses?.[0]?.[0]?.categoryName || '?'}`
+            + ` score=${(r.handednesses?.[0]?.[0]?.score ?? 0).toFixed(2)}`;
+    }
+    log(`RESULT ${c}: hands=${n} ${ms}ms${extra}`);
+  }
+  log("DONE");
+} catch (e) { log("ERROR " + (e && e.stack || e)); log("DONE"); }
+</script>

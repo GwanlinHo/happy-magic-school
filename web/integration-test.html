@@ -1,0 +1,83 @@
+<!doctype html><meta charset="utf-8"><title>整合測試：真 MediaPipe → 判定層</title>
+<pre id="log">booting...</pre>
+<video id="v" autoplay muted playsinline></video>
+<script type="module">
+// headless 整合測試：假相機影片 → 真 MediaPipe → 本專案的校正層與判定層。
+// 影片刻意用 3 fps 編碼放慢：Pi 上推論約 700ms/幀，太快的影片會來不及取樣。
+// 四段（以影片時間計）：0~10s 自然垂放、10~20s 盡力舉高、20~25s 回落、25~50s 高舉維持。
+import { Calibrator } from '../src/input/calibration.js';
+import { readHands, computeSignals } from '../src/input/signals.js';
+import { RuneBank } from '../src/input/runes.js';
+
+const el = document.getElementById('log');
+const log = s => { el.textContent += "\n" + s; };
+el.textContent = 'start';
+const asserts = [];
+const check = (ok, msg) => { asserts.push((ok ? 'PASS ' : 'FAIL ') + msg); };
+
+try {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+  const v = document.getElementById('v');
+  v.srcObject = stream;
+  await new Promise(r => v.onloadedmetadata = r);
+  await v.play();
+  log(`camera ${v.videoWidth}x${v.videoHeight}`);
+
+  const vision = await import('./vendor/vision_bundle.mjs');
+  const fileset = await vision.FilesetResolver.forVisionTasks('./vendor/wasm');
+  const hl = await vision.HandLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: './vendor/hand_landmarker.task', delegate: 'CPU' },
+    runningMode: 'VIDEO', numHands: 2,
+    minHandDetectionConfidence: 0.3, minHandPresenceConfidence: 0.3, minTrackingConfidence: 0.3,
+  });
+  log('landmarker ready');
+
+  const cal = new Calibrator();
+  let profile = null, bank = null, calTried = false;
+  let frames = 0, twoHandFrames = 0;
+  const t0 = performance.now();
+
+  // Pi 上推論很慢，用影片播放時間(v.currentTime)判斷所在階段，而非牆鐘時間。
+  while (v.currentTime < 48 && performance.now() - t0 < 300000) {
+    const res = hl.detectForVideo(v, performance.now());
+    const hands = readHands(res);
+    frames++;
+    if (hands.length >= 2) twoHandFrames++;
+    const ct = v.currentTime;
+
+    if (ct < 10.0) { if (cal.step !== 'rest') cal.begin('rest'); cal.feed(hands); }
+    else if (ct < 20.0) { if (cal.step !== 'top') cal.begin('top'); cal.feed(hands); }
+    else if (!profile && !calTried) {
+      calTried = true;
+      profile = cal.build();
+      log(`calibration: rest=${cal.count('rest')} top=${cal.count('top')} profile=${profile ? JSON.stringify({yRest:+profile.yRest.toFixed(3),yTop:+profile.yTop.toFixed(3),range:+profile.range.toFixed(3)}) : 'null'}`);
+      check(!!profile, '用真實辨識結果可以完成校正');
+      if (profile) bank = new RuneBank(['light', 'guard', 'shield', 'flame', 'flow']);
+    }
+    if (bank) bank.update(performance.now(), computeSignals(hands, profile));
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  const rate = twoHandFrames / frames;
+  log(`frames=${frames} twoHands=${twoHandFrames} (${(rate*100).toFixed(0)}%)`);
+  check(rate > 0.8, `雙手偵測率 ${(rate*100).toFixed(0)}% 應高於 80%`);
+
+  if (bank) {
+    const st = bank.update(performance.now(), null);
+    for (const k of Object.keys(st)) {
+      const s = st[k];
+      log(`  ${k}: ${'holdMs' in s ? 'maxHold=' + s.maxHoldMs.toFixed(0) + 'ms' : 'count=' + s.count}`);
+    }
+    check(st.light.maxHoldMs >= 1500, `高舉維持應被判定（實得 ${st.light.maxHoldMs.toFixed(0)}ms）`);
+    check(st.shield.maxHoldMs < 800, `高舉時不應誤判成護盾（實得 ${st.shield.maxHoldMs.toFixed(0)}ms）`);
+    check(st.flame.count <= 2, `高舉時不應誤判成橫揮（實得 ${st.flame.count} 次）`);
+    check(st.guard.maxHoldMs < 900, `手經過胸口高度不應誤判成前推維持（實得 ${st.guard.maxHoldMs.toFixed(0)}ms）`);
+    check(st.flow.count <= 1, `高舉時不應誤判成上下擺（實得 ${st.flow.count} 次）`);
+  }
+
+  log('--- asserts ---');
+  asserts.forEach(a => log(a));
+  log(asserts.some(a => a.startsWith('FAIL')) ? 'RESULT FAIL' : 'RESULT PASS');
+  log('DONE');
+} catch (e) { log('ERROR ' + (e && e.stack || e)); log('RESULT FAIL'); log('DONE'); }
+</script>

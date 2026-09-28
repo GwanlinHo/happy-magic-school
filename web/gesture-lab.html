@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>哈比魔法學校 — 鏡頭檢查與手勢測試</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{--bg:#f7f4ee;--ink:#2e2a26;--line:#d8d0c2;--accent:#c4622d;--ok:#3f8a5a;--dim:#8a8378;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 "Noto Sans TC",system-ui,sans-serif}
+  header{padding:12px 16px;border-bottom:2px solid var(--line);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+  h1{font-size:19px;margin:0}
+  .sub{color:var(--dim);font-size:13px}
+  main{display:grid;grid-template-columns:minmax(320px,1fr) minmax(300px,1fr);gap:16px;padding:16px;max-width:1200px}
+  @media(max-width:820px){main{grid-template-columns:1fr}}
+  section{background:#fff;border:2px solid var(--line);border-radius:12px;padding:14px}
+  h2{font-size:15px;margin:0 0 10px;letter-spacing:.04em}
+  .stage{position:relative;background:#111;border-radius:10px;overflow:hidden;aspect-ratio:4/3}
+  video,canvas.ov{position:absolute;inset:0;width:100%;height:100%}
+  video{object-fit:cover;transform:scaleX(-1)}
+  canvas.ov{transform:scaleX(-1)}
+  button{font:inherit;padding:8px 14px;border:2px solid var(--ink);border-radius:999px;background:#fff;cursor:pointer}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button:disabled{opacity:.4;cursor:default}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line);font-size:14px}
+  th{color:var(--dim);font-weight:500;width:5.5em}
+  .bar{height:9px;background:#eee;border-radius:5px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--accent);width:0}
+  .rune{display:grid;grid-template-columns:4.2em 1fr 5.5em;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+  .rune b{font-size:15px}
+  .rune small{color:var(--dim);display:block;font-size:12px;line-height:1.3}
+  .rune.on b{color:var(--ok)}
+  .num{text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
+  #status{padding:8px 12px;border-radius:8px;background:#fff6e8;border:1px solid #e8c9a0;font-size:14px}
+  #pad{width:100%;aspect-ratio:1;background:#fff;border:2px dashed var(--line);border-radius:10px;touch-action:none}
+  .hint{color:var(--dim);font-size:13px;margin:6px 0 0}
+</style>
+
+<header>
+  <h1>哈比魔法學校 — 鏡頭檢查與手勢測試</h1>
+  <span class="sub">P1 開發工具。確認鏡頭看得到手、判定是否正常。</span>
+</header>
+
+<main>
+  <section>
+    <h2>鏡頭</h2>
+    <div class="stage"><video id="cam" playsinline muted></video><canvas class="ov" id="ov"></canvas></div>
+    <div class="row">
+      <button class="primary" id="start">開啟鏡頭</button>
+      <button id="calRest" disabled>校正：自然垂放</button>
+      <button id="calTop" disabled>校正：盡力舉高</button>
+      <button id="recal" disabled>重新校正</button>
+    </div>
+    <div id="status">尚未開啟鏡頭。請把平板立在桌上、稍微仰角，人坐在 70～90 公分外。</div>
+    <p class="hint">影像只在這台裝置上運算，不會上傳，也不會存檔。</p>
+  </section>
+
+  <section>
+    <h2>即時訊號</h2>
+    <table>
+      <tr><th>抬升度</th><td><div class="bar"><i id="b-lift"></i></div></td><td class="num" id="v-lift">—</td></tr>
+      <tr><th>雙手高度差</th><td><div class="bar"><i id="b-tilt"></i></div></td><td class="num" id="v-tilt">—</td></tr>
+      <tr><th>雙手張開</th><td><div class="bar"><i id="b-spread"></i></div></td><td class="num" id="v-spread">—</td></tr>
+      <tr><th>左右偏移</th><td><div class="bar"><i id="b-sway"></i></div></td><td class="num" id="v-sway">—</td></tr>
+      <tr><th>偵測率</th><td><div class="bar"><i id="b-rate"></i></div></td><td class="num" id="v-rate">—</td></tr>
+      <tr><th>推論耗時</th><td colspan="2" class="num" id="v-ms">—</td></tr>
+    </table>
+
+    <h2 style="margin-top:16px">五符文判定</h2>
+    <div id="runes"></div>
+
+    <div class="row">
+      <button id="modeBtn">切換成觸控模式</button>
+      <button id="resetBtn">歸零</button>
+    </div>
+    <div id="touchRow" class="row" hidden></div>
+  </section>
+
+  <section>
+    <h2>畫形辨識（解謎用）</h2>
+    <canvas id="pad" width="420" height="420"></canvas>
+    <div class="row"><button id="clearPad">清除</button><span id="shapeOut" class="sub">在上面用手指或滑鼠畫一個圖形</span></div>
+    <p class="hint">可辨識：圓、三角、方、波、斜線、螺旋。</p>
+  </section>
+
+  <section>
+    <h2>這頁要看什麼</h2>
+    <ol style="padding-left:1.2em;margin:0">
+      <li>手舉到最高時，手還在鏡頭畫面裡嗎？骨架還畫得出來嗎？</li>
+      <li>「偵測率」是不是穩定在八成以上？</li>
+      <li>做各個動作時，對應的符文會不會亮起來、其他會不會誤亮？</li>
+      <li>手不動的時候，數字會不會自己亂跳？</li>
+    </ol>
+    <p class="hint">有任何一項不對，把畫面上的數字告訴我就好。</p>
+  </section>
+</main>
+
+<script type="module">
+import { Calibrator, defaultProfile } from '../src/input/calibration.js';
+import { readHands, computeSignals } from '../src/input/signals.js';
+import { RUNES, RUNE_KEYS, RuneBank } from '../src/input/runes.js';
+import { TouchRuneBank, InputRouter } from '../src/input/touch.js';
+import { ShapeRecognizer, builtinTemplates } from '../src/input/shape.js';
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status');
+const setStatus = (t) => statusEl.textContent = t;
+
+// --- 符文列 ---
+const runesEl = $('runes');
+for (const k of RUNE_KEYS) {
+  const r = RUNES[k];
+  runesEl.insertAdjacentHTML('beforeend',
+    `<div class="rune" id="r-${k}"><div><b>${r.name}</b><small>${r.type === 'hold' ? '維持' : '往復'}</small></div>
+     <div><small>${r.action}</small><div class="bar"><i id="rb-${k}"></i></div></div>
+     <div class="num" id="rv-${k}">—</div></div>`);
+}
+
+// --- 輸入 ---
+const gestureBank = new RuneBank();
+const touchBank = new TouchRuneBank();
+const router = new InputRouter({ gestureBank, touchBank });
+
+const touchRow = $('touchRow');
+for (const k of RUNE_KEYS) {
+  const r = RUNES[k];
+  const b = document.createElement('button');
+  b.textContent = r.type === 'hold' ? `按住 ${r.name}` : `點 ${r.name}`;
+  if (r.type === 'hold') {
+    const down = (e) => { e.preventDefault(); touchBank.setPressed(k, true); };
+    const up = (e) => { e.preventDefault(); touchBank.setPressed(k, false); };
+    b.addEventListener('pointerdown', down);
+    b.addEventListener('pointerup', up);
+    b.addEventListener('pointercancel', up);
+    b.addEventListener('pointerleave', up);
+  } else {
+    b.addEventListener('click', () => touchBank.tap(k, performance.now()));
+  }
+  touchRow.appendChild(b);
+}
+
+$('modeBtn').onclick = () => {
+  const next = router.mode === 'gesture' ? 'touch' : 'gesture';
+  router.setMode(next);
+  touchRow.hidden = next !== 'touch';
+  $('modeBtn').textContent = next === 'touch' ? '切換成手勢模式' : '切換成觸控模式';
+};
+$('resetBtn').onclick = () => { gestureBank.reset(); touchBank.reset(); };
+
+// --- 畫形 ---
+const rec = new ShapeRecognizer(builtinTemplates());
+const pad = $('pad'), pctx = pad.getContext('2d');
+let stroke = [], drawing = false;
+const padPos = (e) => {
+  const r = pad.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * pad.width / r.width, y: (e.clientY - r.top) * pad.height / r.height };
+};
+const clearPad = () => { pctx.clearRect(0, 0, pad.width, pad.height); stroke = []; };
+pad.addEventListener('pointerdown', e => { e.preventDefault(); drawing = true; clearPad(); stroke.push(padPos(e)); });
+pad.addEventListener('pointermove', e => {
+  if (!drawing) return;
+  const p = padPos(e); stroke.push(p);
+  pctx.strokeStyle = '#c4622d'; pctx.lineWidth = 4; pctx.lineCap = 'round';
+  pctx.beginPath();
+  pctx.moveTo(stroke[stroke.length - 2].x, stroke[stroke.length - 2].y);
+  pctx.lineTo(p.x, p.y); pctx.stroke();
+});
+const endStroke = () => {
+  if (!drawing) return;
+  drawing = false;
+  const got = rec.recognize(stroke);
+  $('shapeOut').textContent = got ? `辨識為「${got.name}」 相似度 ${(got.score * 100).toFixed(0)}%` : '認不出來，再畫一次';
+};
+pad.addEventListener('pointerup', endStroke);
+pad.addEventListener('pointerleave', endStroke);
+$('clearPad').onclick = () => { clearPad(); $('shapeOut').textContent = '在上面用手指或滑鼠畫一個圖形'; };
+
+// --- 鏡頭與辨識 ---
+let landmarker = null, profile = defaultProfile(), calibrator = new Calibrator(), calStep = null;
+const video = $('cam'), ov = $('ov'), octx = ov.getContext('2d');
+let frames = 0, detected = 0, inferMs = 0;
+
+const CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+function drawOverlay(hands) {
+  octx.clearRect(0, 0, ov.width, ov.height);
+  octx.lineWidth = 3; octx.strokeStyle = '#ffd24a'; octx.fillStyle = '#c4622d';
+  for (const h of hands) {
+    for (const [a, b] of CONNECTIONS) {
+      octx.beginPath();
+      octx.moveTo(h.landmarks[a].x * ov.width, h.landmarks[a].y * ov.height);
+      octx.lineTo(h.landmarks[b].x * ov.width, h.landmarks[b].y * ov.height);
+      octx.stroke();
+    }
+    for (const p of h.landmarks) {
+      octx.beginPath(); octx.arc(p.x * ov.width, p.y * ov.height, 4, 0, 7); octx.fill();
+    }
+  }
+  // 校正後的「高舉基準線」
+  if (!profile.isDefault) {
+    octx.strokeStyle = '#3f8a5a'; octx.setLineDash([8, 6]); octx.lineWidth = 2;
+    const y = (profile.yRest - 0.72 * profile.range) * ov.height;
+    octx.beginPath(); octx.moveTo(0, y); octx.lineTo(ov.width, y); octx.stroke();
+    octx.setLineDash([]);
+  }
+}
+
+const setBar = (id, frac) => $(id).style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
+
+function paint(sig, states) {
+  if (sig) {
+    $('v-lift').textContent = sig.lift.toFixed(2);   setBar('b-lift', sig.lift);
+    $('v-tilt').textContent = sig.tilt.toFixed(2);   setBar('b-tilt', Math.abs(sig.tilt) / 0.5);
+    $('v-spread').textContent = sig.spread.toFixed(2); setBar('b-spread', sig.spread / 4);
+    $('v-sway').textContent = sig.sway.toFixed(2);   setBar('b-sway', Math.abs(sig.sway));
+  }
+  const rate = frames ? detected / frames : 0;
+  $('v-rate').textContent = (rate * 100).toFixed(0) + '%'; setBar('b-rate', rate);
+  $('v-ms').textContent = frames ? (inferMs / frames).toFixed(0) + ' ms' : '—';
+
+  for (const k of RUNE_KEYS) {
+    const st = states[k], row = $('r-' + k);
+    if (RUNES[k].type === 'hold') {
+      row.classList.toggle('on', !!st.holding);
+      $('rv-' + k).textContent = (st.holdMs / 1000).toFixed(1) + ' / 最長 ' + (st.maxHoldMs / 1000).toFixed(1) + ' 秒';
+      setBar('rb-' + k, st.holdMs / 15000);
+    } else {
+      row.classList.toggle('on', st.count > 0);
+      $('rv-' + k).textContent = st.count + ' 次';
+      setBar('rb-' + k, (st.count % 10) / 10);
+    }
+  }
+}
+
+async function loop() {
+  const t = performance.now();
+  let hands = [], sig = null;
+  if (landmarker && video.readyState >= 2) {
+    const a = performance.now();
+    const res = landmarker.detectForVideo(video, t);
+    inferMs += performance.now() - a; frames++;
+    hands = readHands(res);
+    if (hands.length) detected++;
+    sig = computeSignals(hands, profile);
+    drawOverlay(hands);
+    if (calStep && calibrator.feed(hands)) {
+      const n = calibrator.count(calStep);
+      setStatus(`校正中（${calStep === 'rest' ? '自然垂放' : '盡力舉高'}）：已取 ${n} / ${Calibrator.MIN_SAMPLES} 幀`);
+      if (n >= Calibrator.MIN_SAMPLES) finishStep();
+    }
+  }
+  const out = router.update(t, sig);
+  paint(sig, out.states);
+  if (out.suggestTouch) setStatus('已經有幾秒沒抓到手了。可以按「切換成觸控模式」先繼續玩。');
+  requestAnimationFrame(loop);
+}
+
+function finishStep() {
+  calStep = null;
+  const p = calibrator.build();
+  if (p) {
+    profile = p;
+    $('recal').disabled = false;
+    setStatus(`校正完成。可及範圍 ${p.range.toFixed(2)}（越大越好，低於 0.20 建議把平板往後移或調仰角）。`);
+  } else if (calibrator.isReady()) {
+    setStatus('校正失敗：舉高與垂放的差距太小。請把平板往後移一點、或把鏡頭往上仰一些，再重新校正。');
+  } else {
+    setStatus('這一步收好了，請再做另一步。');
+  }
+}
+
+$('start').onclick = async () => {
+  $('start').disabled = true;
+  setStatus('開啟鏡頭中…');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+    video.srcObject = stream;
+    await video.play();
+    ov.width = video.videoWidth || 640; ov.height = video.videoHeight || 480;
+    setStatus('載入辨識模型中…（第一次比較久）');
+    const vision = await import('./vendor/vision_bundle.mjs');
+    const fileset = await vision.FilesetResolver.forVisionTasks('./vendor/wasm');
+    landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: './vendor/hand_landmarker.task', delegate: 'GPU' },
+      runningMode: 'VIDEO', numHands: 2,
+      minHandDetectionConfidence: 0.3, minHandPresenceConfidence: 0.3, minTrackingConfidence: 0.3,
+    });
+    $('calRest').disabled = false; $('calTop').disabled = false;
+    setStatus('準備好了。先按「校正：自然垂放」，雙手自然放在身前一秒；再按「校正：盡力舉高」，雙手盡量舉高但要留在畫面裡。');
+  } catch (e) {
+    setStatus('開啟失敗：' + (e && e.message || e) + '。可以直接按「切換成觸控模式」測試其餘功能。');
+    $('start').disabled = false;
+  }
+};
+
+const beginStep = (step) => { calStep = step; calibrator.begin(step); setStatus('請保持姿勢…'); };
+$('calRest').onclick = () => beginStep('rest');
+$('calTop').onclick = () => beginStep('top');
+$('recal').onclick = () => { calibrator = new Calibrator(); profile = defaultProfile(); gestureBank.reset(); setStatus('已清除校正，請重做兩個步驟。'); };
+
+loop();
+</script>
+</html>

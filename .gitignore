@@ -1,0 +1,9 @@
+node_modules/
+p0/node_modules/
+p0/frames/
+p0/seq/
+p0/seq2/
+p0/*.y4m
+p0/hand_landmarker.task
+web/vendor/
+__pycache__/

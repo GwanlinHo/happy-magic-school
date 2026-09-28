@@ -1,0 +1,53 @@
+<!doctype html><meta charset="utf-8"><title>P0 fake camera</title>
+<pre id="log">booting...</pre><video id="v" autoplay muted playsinline style="width:320px"></video>
+<script type="module">
+const el = document.getElementById('log');
+const log = s => { el.textContent += "\n" + s; };
+el.textContent = "start";
+try {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+  log("getUserMedia OK");
+  const v = document.getElementById('v');
+  v.srcObject = stream;
+  await new Promise(r => v.onloadedmetadata = r);
+  await v.play();
+  log(`video ${v.videoWidth}x${v.videoHeight}`);
+
+  const vision = await import('./node_modules/@mediapipe/tasks-vision/vision_bundle.mjs');
+  const fileset = await vision.FilesetResolver.forVisionTasks('./node_modules/@mediapipe/tasks-vision/wasm');
+  const hl = await vision.HandLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: './hand_landmarker.task', delegate: 'CPU' },
+    runningMode: 'VIDEO', numHands: 2,
+    minHandDetectionConfidence: 0.2, minHandPresenceConfidence: 0.2, minTrackingConfidence: 0.2,
+  });
+  log("landmarker ready (VIDEO)");
+
+  // 判定層原型：手腕 y 低於門檻(畫面上方)即累積維持時間，遲滯 0.03
+  const HI = 0.35, LO = 0.38;
+  let holding = false, holdMs = 0, maxHold = 0, last = performance.now();
+  const ys = [];
+  let frames = 0, detected = 0, totalMs = 0;
+  const t0 = performance.now();
+  while (performance.now() - t0 < 25000 && frames < 120) {
+    const now = performance.now();
+    const a = performance.now();
+    const r = hl.detectForVideo(v, now);
+    totalMs += performance.now() - a;
+    frames++;
+    const dt = now - last; last = now;
+    if (r.landmarks && r.landmarks.length) {
+      detected++;
+      const y = r.landmarks[0][0].y;
+      ys.push(y.toFixed(3));
+      if (!holding && y < HI) { holding = true; holdMs = 0; }
+      else if (holding && y > LO) { holding = false; }
+      if (holding) { holdMs += dt; maxHold = Math.max(maxHold, holdMs); }
+    }
+    await new Promise(r => setTimeout(r, 0));
+  }
+  log(`frames=${frames} detected=${detected} (${(100*detected/frames).toFixed(0)}%) avgInfer=${(totalMs/frames).toFixed(0)}ms`);
+  log(`wrist y samples: ${ys.filter((_,i)=>i%8===0).join(' ')}`);
+  log(`maxHold=${maxHold.toFixed(0)}ms`);
+  log("DONE");
+} catch (e) { log("ERROR " + (e && e.stack || e)); log("DONE"); }
+</script>
