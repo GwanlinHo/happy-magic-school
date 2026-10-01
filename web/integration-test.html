@@ -4,7 +4,10 @@
 <script type="module">
 // headless 整合測試：假相機影片 → 真 MediaPipe → 本專案的校正層與判定層。
 // 影片刻意用 2 fps 編碼放慢：Pi 上推論約 700ms/幀，太快的影片會來不及取樣。
-// 四段（以影片時間計）：0~15s 自然垂放、15~30s 盡力舉高、30~37.5s 回落、37.5~75s 高舉維持。
+// 四段（以影片時間計）：0~15s 垂放、15~30s 抬到肩線、30~37.5s 回落、37.5~75s 抬到肩線維持。
+// 影片全程張開手：2D 色塊畫的拳頭 MediaPipe 偵測不到（爪形只認得一隻、全握兩隻都認不出）。
+// 因此這支影片專門驗「校正量不到手型差異 → 自動降級成不看手型」這條路徑；
+// 手型判定本身由單元測試覆蓋（合成座標可完全控制）。真人的握拳要在實機確認。
 import { Calibrator } from '../src/input/calibration.js';
 import { readHands, computeSignals } from '../src/input/signals.js';
 import { RuneBank } from '../src/input/runes.js';
@@ -46,12 +49,19 @@ try {
     const ct = v.currentTime;
 
     if (ct < 15.0) { if (cal.step !== 'rest') cal.begin('rest'); cal.feed(hands); }
-    else if (ct < 30.0) { if (cal.step !== 'top') cal.begin('top'); cal.feed(hands); }
+    else if (ct < 30.0) { if (cal.step !== 'shoulder') cal.begin('shoulder'); cal.feed(hands); }
     else if (!profile && !calTried) {
       calTried = true;
-      profile = cal.build();
-      log(`calibration: rest=${cal.count('rest')} top=${cal.count('top')} profile=${profile ? JSON.stringify({yRest:+profile.yRest.toFixed(3),yTop:+profile.yTop.toFixed(3),range:+profile.range.toFixed(3)}) : 'null'}`);
+      const built = cal.build();
+      profile = built && !built.error ? built : null;
+      log(`calibration: rest=${cal.count('rest')} shoulder=${cal.count('shoulder')} ` +
+          (profile ? JSON.stringify({ yRest: +profile.yRest.toFixed(3), yShoulder: +profile.yShoulder.toFixed(3),
+                                      range: +profile.range.toFixed(3),
+                                      curlOpen: +profile.curlOpen.toFixed(2), curlFist: +profile.curlFist.toFixed(2) })
+                    : 'FAILED ' + (built && built.error)));
       check(!!profile, '用真實辨識結果可以完成校正');
+      check(!!profile && profile.curlUsable === false,
+        `全程張開手時應判定「手型量不出差別」並自動降級（實得 curlUsable=${profile && profile.curlUsable}）`);
       if (profile) bank = new RuneBank(['light', 'guard', 'shield', 'flame', 'flow']);
     }
     if (bank) bank.update(performance.now(), computeSignals(hands, profile));
@@ -68,15 +78,15 @@ try {
       const s = st[k];
       log(`  ${k}: ${'holdMs' in s ? 'maxHold=' + s.maxHoldMs.toFixed(0) + 'ms' : 'count=' + s.count}`);
     }
-    check(st.light.maxHoldMs >= 1500, `高舉維持應被判定（實得 ${st.light.maxHoldMs.toFixed(0)}ms）`);
-    check(st.shield.maxHoldMs < 800, `高舉時不應誤判成護盾（實得 ${st.shield.maxHoldMs.toFixed(0)}ms）`);
-    check(st.flame.count <= 2, `高舉時不應誤判成橫揮（實得 ${st.flame.count} 次）`);
-    check(st.guard.maxHoldMs < 900, `手經過胸口高度不應誤判成前推維持（實得 ${st.guard.maxHoldMs.toFixed(0)}ms）`);
-    check(st.flow.count <= 1, `高舉時不應誤判成上下擺（實得 ${st.flow.count} 次）`);
+    check(st.light.maxHoldMs >= 1500, `抬到肩線的維持應被判定（實得 ${st.light.maxHoldMs.toFixed(0)}ms）`);
+    check(st.shield.maxHoldMs < 800, `不應誤判成護盾（實得 ${st.shield.maxHoldMs.toFixed(0)}ms）`);
+    check(st.flame.count <= 2, `不應誤判成橫揮（實得 ${st.flame.count} 次）`);
+    check(st.guard.maxHoldMs < 900, `降級模式下，手經過胸口高度仍不應誤判成「固」（實得 ${st.guard.maxHoldMs.toFixed(0)}ms）`);
+    check(st.flow.count <= 1, `不應誤判成上下擺（實得 ${st.flow.count} 次）`);
   }
 
   // 防呆：假如迴圈提早結束，上面的檢查會整批沒跑到，卻還是印出 PASS。
-  const EXPECTED_ASSERTS = 8;
+  const EXPECTED_ASSERTS = 9;
   check(asserts.length >= EXPECTED_ASSERTS - 1,
     `應執行 ${EXPECTED_ASSERTS} 項檢查，實際只跑了 ${asserts.length + 1} 項（迴圈可能提早結束）`);
 

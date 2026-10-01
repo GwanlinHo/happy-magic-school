@@ -1,6 +1,9 @@
 <!doctype html><meta charset="utf-8"><title>P0 hand detect</title>
 <pre id="log">booting...</pre>
 <script type="module">
+const CURL_FINGERS=[[5,8],[9,12],[13,16],[17,20]];
+const rawCurl=(lm)=>{let s=0;for(const [m,t] of CURL_FINGERS){const w=lm[0];
+ const b=Math.hypot(lm[m].x-w.x,lm[m].y-w.y)||1e-6;s+=Math.hypot(lm[t].x-w.x,lm[t].y-w.y)/b;}return s/4;};
 const log = (s) => { document.getElementById('log').textContent += "\n" + s; };
 document.getElementById('log').textContent = "start";
 try {
@@ -14,7 +17,7 @@ try {
     minHandPresenceConfidence: 0.2, minTrackingConfidence: 0.2,
   });
   log("landmarker ready");
-  const cases = ['open_center','open_high','fist','two_hands','tilt'];
+  const cases = ['open_center','open_high','fist','two_hands','two_fists','tilt'];
   for (const c of cases) {
     const img = new Image();
     img.src = `./frames/${c}.png`;
@@ -28,7 +31,8 @@ try {
       const w = r.landmarks[0][0];
       extra = ` wrist=(${w.x.toFixed(3)},${w.y.toFixed(3)}) pts=${r.landmarks[0].length}`
             + ` handed=${r.handednesses?.[0]?.[0]?.categoryName || '?'}`
-            + ` score=${(r.handednesses?.[0]?.[0]?.score ?? 0).toFixed(2)}`;
+            + ` score=${(r.handednesses?.[0]?.[0]?.score ?? 0).toFixed(2)}`
+            + ` rawCurlRatio=${r.landmarks.map(l=>rawCurl(l).toFixed(2)).join('/')}`;
     }
     log(`RESULT ${c}: hands=${n} ${ms}ms${extra}`);
   }

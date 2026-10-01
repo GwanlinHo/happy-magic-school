@@ -16,13 +16,22 @@ def capsule(d, p0, p1, r, fill, outline=None, ow=2):
         d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill)
 
 def finger(d, base, angle_deg, seg_lens, r, curl=0.0):
-    """從 base 沿 angle 畫分節手指；curl>0 表示彎曲(握拳)。"""
+    """從 base 沿 angle 畫分節手指；curl>0 表示彎曲。
+
+    注意：curl=1 畫出來比較像「半握的爪形」而不是緊握的拳頭。
+    試過把三節折到合計 180 度做成真正的拳頭，結果 MediaPipe 完全偵測不到
+    （2D 色塊畫的拳頭缺少真實手部的輪廓線索）。爪形雖然不夠像，
+    但能被偵測、而且伸展比（約 1.6）與張開（約 2.06）分得開，
+    足以在整合測試裡驗證「手型訊號」這條路徑是通的。
+    真正的拳頭與張開能不能分開，要在真人實機上確認。"""
     pts = [base]
     a = math.radians(angle_deg)
+    bend = (15, 35, 35)
     for i, L in enumerate(seg_lens):
-        a += math.radians(curl * (35 if i else 15))
-        x = pts[-1][0] + L * math.cos(a)
-        y = pts[-1][1] + L * math.sin(a)
+        a += math.radians(curl * bend[i] if i < len(bend) else 0)
+        Lc = L
+        x = pts[-1][0] + Lc * math.cos(a)
+        y = pts[-1][1] + Lc * math.sin(a)
         pts.append((x, y))
     rr = r
     for i in range(len(pts) - 1):

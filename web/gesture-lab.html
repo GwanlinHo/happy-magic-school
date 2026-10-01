@@ -49,11 +49,11 @@
     <div class="stage"><video id="cam" playsinline muted></video><canvas class="ov" id="ov"></canvas></div>
     <div class="row">
       <button class="primary" id="start">開啟鏡頭</button>
-      <button id="calRest" disabled>校正：自然垂放</button>
-      <button id="calTop" disabled>校正：盡力舉高</button>
+      <button id="calRest" disabled>校正一：垂放、手張開</button>
+      <button id="calShoulder" disabled>校正二：抬到肩膀、握拳</button>
       <button id="recal" disabled>重新校正</button>
     </div>
-    <div id="status">尚未開啟鏡頭。請把平板立在桌上、稍微仰角，人坐在 70～90 公分外。</div>
+    <div id="status">尚未開啟鏡頭。請把平板立在桌上、稍微往上仰，人坐在 50～70 公分外（跟平常用平板差不多）。</div>
     <p class="hint">影像只在這台裝置上運算，不會上傳，也不會存檔。</p>
   </section>
 
@@ -64,6 +64,7 @@
       <tr><th>雙手高度差</th><td><div class="bar"><i id="b-tilt"></i></div></td><td class="num" id="v-tilt">—</td></tr>
       <tr><th>雙手張開</th><td><div class="bar"><i id="b-spread"></i></div></td><td class="num" id="v-spread">—</td></tr>
       <tr><th>左右偏移</th><td><div class="bar"><i id="b-sway"></i></div></td><td class="num" id="v-sway">—</td></tr>
+      <tr><th>握拳程度</th><td><div class="bar"><i id="b-curl"></i></div></td><td class="num" id="v-curl">—</td></tr>
       <tr><th>偵測率</th><td><div class="bar"><i id="b-rate"></i></div></td><td class="num" id="v-rate">—</td></tr>
       <tr><th>推論耗時</th><td colspan="2" class="num" id="v-ms">—</td></tr>
     </table>
@@ -88,9 +89,10 @@
   <section>
     <h2>這頁要看什麼</h2>
     <ol style="padding-left:1.2em;margin:0">
-      <li>手舉到最高時，手還在鏡頭畫面裡嗎？骨架還畫得出來嗎？</li>
+      <li>手抬到肩膀高度時，手還在鏡頭畫面裡嗎？骨架還畫得出來嗎？</li>
       <li>「偵測率」是不是穩定在八成以上？</li>
       <li>做各個動作時，對應的符文會不會亮起來、其他會不會誤亮？</li>
+      <li>張開手與握拳時，「握拳程度」有沒有明顯在 0 和 1 之間切換？</li>
       <li>手不動的時候，數字會不會自己亂跳？</li>
     </ol>
     <p class="hint">有任何一項不對，把畫面上的數字告訴我就好。</p>
@@ -179,7 +181,7 @@ pad.addEventListener('pointerleave', endStroke);
 $('clearPad').onclick = () => { clearPad(); $('shapeOut').textContent = '在上面用手指或滑鼠畫一個圖形'; };
 
 // --- 鏡頭與辨識 ---
-let landmarker = null, profile = defaultProfile(), calibrator = new Calibrator(), calStep = null;
+let landmarker = null, profile = defaultProfile(), calibrator = new Calibrator(), calStep = null, stalled = 0;
 const video = $('cam'), ov = $('ov'), octx = ov.getContext('2d');
 let frames = 0, detected = 0, inferMs = 0;
 
@@ -203,7 +205,7 @@ function drawOverlay(hands) {
   // 校正後的「高舉基準線」
   if (!profile.isDefault) {
     octx.strokeStyle = '#3f8a5a'; octx.setLineDash([8, 6]); octx.lineWidth = 2;
-    const y = (profile.yRest - 0.72 * profile.range) * ov.height;
+    const y = (profile.yRest - 0.78 * profile.range) * ov.height;   // 「光」的進入門檻
     octx.beginPath(); octx.moveTo(0, y); octx.lineTo(ov.width, y); octx.stroke();
     octx.setLineDash([]);
   }
@@ -217,6 +219,7 @@ function paint(sig, states) {
     $('v-tilt').textContent = sig.tilt.toFixed(2);   setBar('b-tilt', Math.abs(sig.tilt) / 0.5);
     $('v-spread').textContent = sig.spread.toFixed(2); setBar('b-spread', sig.spread / 4);
     $('v-sway').textContent = sig.sway.toFixed(2);   setBar('b-sway', Math.abs(sig.sway));
+    $('v-curl').textContent = sig.curl.toFixed(2);   setBar('b-curl', sig.curl);
   }
   const rate = frames ? detected / frames : 0;
   $('v-rate').textContent = (rate * 100).toFixed(0) + '%'; setBar('b-rate', rate);
@@ -247,9 +250,14 @@ async function loop() {
     if (hands.length) detected++;
     sig = computeSignals(hands, profile);
     drawOverlay(hands);
-    if (calStep && calibrator.feed(hands)) {
+    if (calStep && !calibrator.feed(hands)) {
+      // 收不到樣本通常是手跑出畫面了——直接講出該怎麼調，不要讓人乾等
+      stalled++;
+      if (stalled > 45) setStatus('看不到雙手。請把平板往後移一點，或讓鏡頭往上仰一些，手才進得了畫面。');
+    } else if (calStep) {
+      stalled = 0;
       const n = calibrator.count(calStep);
-      setStatus(`校正中（${calStep === 'rest' ? '自然垂放' : '盡力舉高'}）：已取 ${n} / ${Calibrator.MIN_SAMPLES} 幀`);
+      setStatus(`校正中（${calStep === 'rest' ? '垂放、手張開' : '抬到肩膀、握拳'}）：已取 ${n} / ${Calibrator.MIN_SAMPLES} 幀`);
       if (n >= Calibrator.MIN_SAMPLES) finishStep();
     }
   }
@@ -262,12 +270,15 @@ async function loop() {
 function finishStep() {
   calStep = null;
   const p = calibrator.build();
-  if (p) {
+  if (p && !p.error) {
     profile = p;
     $('recal').disabled = false;
-    setStatus(`校正完成。可及範圍 ${p.range.toFixed(2)}（越大越好，低於 0.20 建議把平板往後移或調仰角）。`);
-  } else if (calibrator.isReady()) {
-    setStatus('校正失敗：舉高與垂放的差距太小。請把平板往後移一點、或把鏡頭往上仰一些，再重新校正。');
+    const curlGap = (p.curlOpen - p.curlFist).toFixed(2);
+    setStatus(p.warning
+      ? `校正完成（${p.hint}）高度差 ${p.range.toFixed(2)}、手型差 ${curlGap}。`
+      : `校正完成。高度差 ${p.range.toFixed(2)}、手型差 ${curlGap}（兩個都是越大越好）。`);
+  } else if (p && p.error) {
+    setStatus('校正失敗：' + p.hint);
   } else {
     setStatus('這一步收好了，請再做另一步。');
   }
@@ -285,17 +296,17 @@ $('start').onclick = async () => {
     const loaded = await loadHandLandmarker();
     landmarker = loaded.landmarker;
     if (loaded.delegate === 'CPU') setStatus('（註：這台裝置的 GPU 加速不可用，已改用 CPU，可能比較慢。）');
-    $('calRest').disabled = false; $('calTop').disabled = false;
-    setStatus('準備好了。先按「校正：自然垂放」，雙手自然放在身前一秒；再按「校正：盡力舉高」，雙手盡量舉高但要留在畫面裡。');
+    $('calRest').disabled = false; $('calShoulder').disabled = false;
+    setStatus('準備好了。先按「校正一」，雙手張開自然放在身前約一秒；再按「校正二」，握拳抬到肩膀高度約一秒。');
   } catch (e) {
     setStatus('開啟失敗：' + (e && e.message || e) + '。可以直接按「切換成觸控模式」測試其餘功能。');
     $('start').disabled = false;
   }
 };
 
-const beginStep = (step) => { calStep = step; calibrator.begin(step); setStatus('請保持姿勢…'); };
+const beginStep = (step) => { calStep = step; stalled = 0; calibrator.begin(step); setStatus('請保持姿勢…'); };
 $('calRest').onclick = () => beginStep('rest');
-$('calTop').onclick = () => beginStep('top');
+$('calShoulder').onclick = () => beginStep('shoulder');
 $('recal').onclick = () => { calibrator = new Calibrator(); profile = defaultProfile(); gestureBank.reset(); setStatus('已清除校正，請重做兩個步驟。'); };
 
 loop();

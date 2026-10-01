@@ -46,61 +46,70 @@ export function sequence({ frames, fps = 15, path, jitter = 0, dropFrames = [], 
     let p = { palm: 0.16, ...path(t, i) };
     if (spikeMap.has(i)) p = { ...p, ...spikeMap.get(i) };
     const j = () => jitter * rnd();
+    const open = p.open !== false;   // path 可回傳 open:false 代表握拳
     out.push({
       t,
       result: makeResult([
-        { x: p.lx + j(), y: p.ly + j(), palm: p.palm },
-        { x: p.rx + j(), y: p.ry + j(), palm: p.palm },
+        { x: p.lx + j(), y: p.ly + j(), palm: p.palm, spreadFingers: open },
+        { x: p.rx + j(), y: p.ry + j(), palm: p.palm, spreadFingers: open },
       ]),
     });
   }
   return out;
 }
 
-/** 常見校正情境：自然垂放 / 盡力舉高。y 越小越高。 */
-export const REST_Y = 0.72, TOP_Y = 0.30;
-export const restPath  = () => ({ lx: 0.34, ly: REST_Y, rx: 0.66, ry: REST_Y });
-export const topPath   = () => ({ lx: 0.34, ly: TOP_Y,  rx: 0.66, ry: TOP_Y });
+// 校正的兩個步驟：自然垂放且手張開 / 抬到肩膀高度且握拳。y 越小越高。
+// 肩線只比垂放高 0.26（不是以前的 0.42）——動作刻意改小、改近身。
+export const REST_Y = 0.72, SHOULDER_Y = 0.46;
+export const restPath     = () => ({ lx: 0.34, ly: REST_Y,     rx: 0.66, ry: REST_Y,     open: true });
+export const shoulderPath = () => ({ lx: 0.34, ly: SHOULDER_Y, rx: 0.66, ry: SHOULDER_Y, open: false });
 
 /** 把 y 從「抬升度」換回影像座標，方便直接寫出想測的動作。 */
-export const yAtLift = (lift) => REST_Y - lift * (REST_Y - TOP_Y);
+export const yAtLift = (lift) => REST_Y - lift * (REST_Y - SHOULDER_Y);
 
-// --- 五個符文動作的合成軌跡 ---------------------------------------------
+// --- 五個符文動作的合成軌跡 -------------------------------------------
+// 全部收在身前一小塊範圍內：最高只到肩線（抬升度 1.0），左右與上下擺幅都小。
 const L0 = 0.34, R0 = 0.66;
 
-/** 光：由自然位置舉到高處並維持。 */
+/** 光：雙手張開，抬到肩線附近維持。 */
 export const pathLight = (t) => {
-  const lift = t < 800 ? (t / 800) * 0.85 : 0.85 + 0.02 * Math.sin(t / 150);
+  const lift = t < 600 ? (t / 600) * 0.90 : 0.90 + 0.02 * Math.sin(t / 150);
   const y = yAtLift(lift);
-  return { lx: L0, ly: y, rx: R0, ry: y };
+  return { lx: L0, ly: y, rx: R0, ry: y, open: true };
 };
 
-/** 固：雙手前推到胸口高度並穩住（高度落在區間內、雙手分開、不晃動）。 */
+/** 固：雙手握拳，停在胸口高度前推。 */
 export const pathGuard = (t) => {
-  const lift = t < 600 ? (t / 600) * 0.40 : 0.40 + 0.01 * Math.sin(t / 200);
+  const lift = t < 400 ? (t / 400) * 0.45 : 0.45 + 0.01 * Math.sin(t / 200);
   const y = yAtLift(lift);
-  return { lx: 0.36, ly: y, rx: 0.64, ry: y };
+  return { lx: 0.36, ly: y, rx: 0.64, ry: y, open: false };
 };
 
-/** 護：雙手交叉靠攏於胸前。 */
+/** 護：雙手握拳交叉靠攏於胸前。 */
 export const pathShield = (t) => {
-  const k = Math.min(1, t / 500);
+  const k = Math.min(1, t / 400);
   const y = yAtLift(0.40);
-  return { lx: L0 + (0.47 - L0) * k, ly: y, rx: R0 + (0.53 - R0) * k, ry: y };
+  return { lx: L0 + (0.47 - L0) * k, ly: y, rx: R0 + (0.53 - R0) * k, ry: y, open: false };
 };
 
-/** 焰：左右交替橫揮（雙手一起左右擺）。 */
+/** 焰：左右小幅交替橫揮。 */
 export const pathFlame = (t) => {
   const c = 0.5 + 0.14 * Math.sin(t / 400);
-  const y = yAtLift(0.35);
-  return { lx: c - 0.14, ly: y, rx: c + 0.14, ry: y };
+  const y = yAtLift(0.40);
+  return { lx: c - 0.14, ly: y, rx: c + 0.14, ry: y, open: true };
 };
 
-/** 流：雙手上下交替擺動。 */
+/** 流：雙手小幅上下交替擺動。 */
 export const pathFlow = (t) => {
-  const d = 0.22 * Math.sin(t / 400);
-  return { lx: L0, ly: yAtLift(0.375 + d), rx: R0, ry: yAtLift(0.375 - d) };
+  const d = 0.14 * Math.sin(t / 400);
+  return { lx: L0, ly: yAtLift(0.40 + d), rx: R0, ry: yAtLift(0.40 - d), open: true };
 };
+
+/** 反例：握拳抬到肩線。用來證明「光」真的有在看手型，而不是只看高度。 */
+export const pathFistAtShoulder = (t) => ({ ...pathLight(t), open: false });
+
+/** 反例：張開手停在胸口前推。用來證明「固」真的有在看手型。 */
+export const pathOpenAtChest = (t) => ({ ...pathGuard(t), open: true });
 
 export const RUNE_PATHS = {
   light: pathLight, guard: pathGuard, shield: pathShield, flame: pathFlame, flow: pathFlow,
